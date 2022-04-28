@@ -16,10 +16,10 @@ import os
 
 import paddle
 import yaml
+
 from paddleaudio.features import LogMelSpectrogram
 from paddleaudio.utils import logger
 from paddleaudio.utils import Timer
-
 from paddlespeech.cls.models import SoundClassifier
 from paddlespeech.s2t.utils.dynamic_import import dynamic_import
 
@@ -66,7 +66,10 @@ if __name__ == "__main__":
     # Model
     backbone_class = dynamic_import(model_conf['backbone'])
     backbone = backbone_class(pretrained=True, extract_embedding=True)
-    model = SoundClassifier(backbone, num_class=data_conf['num_classes'])
+    model = SoundClassifier(
+        backbone,
+        feat_layer=feature_extractor,
+        num_class=data_conf['num_classes'])
     model = paddle.DataParallel(model)
     optimizer = paddle.optimizer.Adam(
         learning_rate=training_conf['learning_rate'],
@@ -85,13 +88,7 @@ if __name__ == "__main__":
         num_samples = 0
         for batch_idx, batch in enumerate(train_loader):
             waveforms, labels = batch
-            feats = feature_extractor(
-                waveforms
-            )  # Need a padding when lengths of waveforms differ in a batch.
-            feats = paddle.transpose(feats, [0, 2, 1])  # To [N, length, n_mels]
-
-            logits = model(feats)
-
+            logits = model(waveforms)
             loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
@@ -106,7 +103,7 @@ if __name__ == "__main__":
             # Calculate metrics
             preds = paddle.argmax(logits, axis=1)
             num_corrects += (preds == labels).numpy().sum()
-            num_samples += feats.shape[0]
+            num_samples += waveforms.shape[0]
 
             timer.count()
 
@@ -148,14 +145,10 @@ if __name__ == "__main__":
             with logger.processing('Evaluation on validation dataset'):
                 for batch_idx, batch in enumerate(dev_loader):
                     waveforms, labels = batch
-                    feats = feature_extractor(waveforms)
-                    feats = paddle.transpose(feats, [0, 2, 1])
-
-                    logits = model(feats)
-
+                    logits = model(waveforms)
                     preds = paddle.argmax(logits, axis=1)
                     num_corrects += (preds == labels).numpy().sum()
-                    num_samples += feats.shape[0]
+                    num_samples += waveforms.shape[0]
 
             print_msg = '[Evaluation result]'
             print_msg += ' dev_acc={:.4f}'.format(num_corrects / num_samples)

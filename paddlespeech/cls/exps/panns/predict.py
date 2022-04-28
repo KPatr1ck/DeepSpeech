@@ -17,10 +17,10 @@ import os
 import paddle
 import paddle.nn.functional as F
 import yaml
+
 from paddleaudio.backends import load as load_audio
 from paddleaudio.features import LogMelSpectrogram
 from paddleaudio.utils import logger
-
 from paddlespeech.cls.models import SoundClassifier
 from paddlespeech.s2t.utils.dynamic_import import dynamic_import
 
@@ -54,14 +54,17 @@ if __name__ == '__main__':
     ds_class = dynamic_import(data_conf['dataset'])
     backbone_class = dynamic_import(model_conf['backbone'])
 
+    feature_extractor = LogMelSpectrogram(**feat_conf)
     model = SoundClassifier(
         backbone=backbone_class(pretrained=False, extract_embedding=True),
+        feat_layer=feature_extractor,
         num_class=len(ds_class.label_list))
     model.set_state_dict(paddle.load(predicting_conf['checkpoint']))
     model.eval()
 
-    feat = extract_features(predicting_conf['audio_file'], **feat_conf)
-    logits = model(feat)
+    waveform, _ = load_audio(predicting_conf['audio_file'], sr=feat_conf['sr'])
+    waveform = paddle.to_tensor(waveform).unsqueeze(0)
+    logits = model(waveform)
     probs = F.softmax(logits, axis=1).numpy()
 
     sorted_indices = (-probs[0]).argsort()

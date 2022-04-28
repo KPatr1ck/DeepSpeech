@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import paddle
 import paddle.nn as nn
 
 
@@ -20,13 +21,16 @@ class SoundClassifier(nn.Layer):
     embeddings from audio files.
     """
 
-    def __init__(self, backbone, num_class, dropout=0.1):
+    def __init__(self, backbone, feat_layer, num_class, dropout=0.1):
         super(SoundClassifier, self).__init__()
+        self.feat_layer = feat_layer
         self.backbone = backbone
         self.dropout = nn.Dropout(dropout)
         self.fc = nn.Linear(self.backbone.emb_size, num_class)
 
     def forward(self, x):
+        x = self.feat_layer(x)
+        x = paddle.transpose(x, [0, 2, 1])
         # x: (batch_size, num_frames, num_melbins) -> (batch_size, 1, num_frames, num_melbins)
         x = x.unsqueeze(1)
         x = self.backbone(x)

@@ -16,16 +16,17 @@ import os
 
 import numpy as np
 from paddle import inference
+from scipy.special import softmax
+
 from paddleaudio.backends import load as load_audio
 from paddleaudio.datasets import ESC50
-from paddleaudio.features import melspectrogram
-from scipy.special import softmax
 
 # yapf: disable
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_dir", type=str, required=True, default="./export", help="The directory to static model.")
 parser.add_argument('--device', choices=['cpu', 'gpu', 'xpu'], default="gpu", help="Select which device to train model, defaults to gpu.")
 parser.add_argument("--wav", type=str, required=True, help="Audio file to infer.")
+parser.add_argument("--sr", type=int, default=32000, help="Audio sample rate.")
 parser.add_argument("--batch_size", type=int, default=1, help="Batch size per GPU/CPU for training.")
 parser.add_argument('--use_tensorrt', type=eval, default=False, choices=[True, False], help='Enable to use tensorrt to speed up.')
 parser.add_argument("--precision", type=str, default="fp32", choices=["fp32", "fp16"], help='The tensorrt precision.')
@@ -34,29 +35,6 @@ parser.add_argument('--enable_mkldnn', type=eval, default=False, choices=[True, 
 parser.add_argument("--log_dir", type=str, default="./log", help="The path to save log.")
 args = parser.parse_args()
 # yapf: enable
-
-
-def extract_features(files: str, **kwargs):
-    waveforms = []
-    srs = []
-    max_length = float('-inf')
-    for file in files:
-        waveform, sr = load_audio(file, sr=None)
-        max_length = max(max_length, len(waveform))
-        waveforms.append(waveform)
-        srs.append(sr)
-
-    feats = []
-    for i in range(len(waveforms)):
-        # padding
-        if len(waveforms[i]) < max_length:
-            pad_width = max_length - len(waveforms[i])
-            waveforms[i] = np.pad(waveforms[i], pad_width=(0, pad_width))
-
-        feat = melspectrogram(waveforms[i], sr, **kwargs).transpose()
-        feats.append(feat)
-
-    return np.stack(feats, axis=0)
 
 
 class Predictor(object):
@@ -114,13 +92,13 @@ class Predictor(object):
         self.output_handle = self.predictor.get_output_handle(
             self.predictor.get_output_names()[0])
 
-    def predict(self, wavs):
-        feats = extract_features(wavs)
-
-        self.input_handles[0].copy_from_cpu(feats)
+    def predict(self, waveform):
+        self.input_handles[0].copy_from_cpu(waveform)
         self.predictor.run()
         logits = self.output_handle.copy_to_cpu()
         probs = softmax(logits, axis=1)
+        import ipdb
+        ipdb.set_trace()
         indices = np.argmax(probs, axis=1)
 
         return indices
@@ -132,13 +110,9 @@ if __name__ == "__main__":
                           args.use_tensorrt, args.precision, args.cpu_threads,
                           args.enable_mkldnn)
 
-    wavs = [args.wav]
-
-    for i in range(len(wavs)):
-        wavs[i] = os.path.abspath(os.path.expanduser(wavs[i]))
-        assert os.path.isfile(
-            wavs[i]), f'Please check input wave file: {wavs[i]}'
-
-    results = predictor.predict(wavs)
-    for idx, wav in enumerate(wavs):
+    waveform, _ = load_audio(args.wav, sr=args.sr)
+    waveform = np.expand_dims(waveform, 0)
+    # waveform = paddle.to_tensor(waveform).unsqueeze(0)
+    results = predictor.predict(waveform)
+    for idx, wav in enumerate([args.wav]):
         print(f'Wav: {wav} \t Label: {ESC50.label_list[results[idx]]}')

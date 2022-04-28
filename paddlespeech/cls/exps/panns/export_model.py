@@ -15,8 +15,9 @@ import argparse
 import os
 
 import paddle
-from paddleaudio.datasets import ESC50
 
+from paddleaudio.datasets import ESC50
+from paddleaudio.features import LogMelSpectrogram
 from paddlespeech.cls.models import cnn14
 from paddlespeech.cls.models import SoundClassifier
 
@@ -28,8 +29,21 @@ args = parser.parse_args()
 # yapf: enable
 
 if __name__ == '__main__':
+    feat_conf = {
+        'sr': 32000,
+        'n_fft': 1024,
+        'hop_length': 320,
+        'window': 'hann',
+        'win_length': 1024,
+        'f_min': 50.0,
+        'f_max': 14000.0,
+        'n_mels': 64,
+    }
+
+    feature_extractor = LogMelSpectrogram(**feat_conf)
     model = SoundClassifier(
         backbone=cnn14(pretrained=False, extract_embedding=True),
+        feat_layer=feature_extractor,
         num_class=len(ESC50.label_list))
     model.set_state_dict(paddle.load(args.checkpoint))
     model.eval()
@@ -37,8 +51,7 @@ if __name__ == '__main__':
     model = paddle.jit.to_static(
         model,
         input_spec=[
-            paddle.static.InputSpec(
-                shape=[None, None, 64], dtype=paddle.float32)
+            paddle.static.InputSpec(shape=[None, None], dtype=paddle.float32)
         ])
 
     # Save in static graph model.
